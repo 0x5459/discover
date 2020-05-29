@@ -1,5 +1,6 @@
 use crate::Instance;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet};
+use std::str::Utf8Error;
 
 pub trait Encoder {
     type Error;
@@ -7,77 +8,48 @@ pub trait Encoder {
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error>;
 }
 
-/// Returns a new `EncoderFn` with the given closure.
-pub fn encoder_fn<T>(f: T) -> EncoderFn<T> {
-    EncoderFn { f }
-}
-
-pub struct EncoderFn<T> {
-    f: T,
-}
-
-impl<T, E> Encoder for EncoderFn<T>
+impl<F, E> Encoder for F
 where
-    T: Fn(&Instance) -> Result<Vec<u8>, E>,
+    F: Fn(&Instance) -> Result<Vec<u8>, E>,
 {
     type Error = E;
-
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error> {
-        (self.f)(ins)
+        self(ins)
     }
 }
 
 pub trait Decoder {
     type Error;
 
-    fn decode(&self, key: &[u8], value: &[u8]) -> Result<Instance, Self::Error>;
+    fn decode(&self, data: &[u8]) -> Result<Instance, Self::Error>;
 }
 
-/// Returns a new `DecoderFn` with the given closure.
-pub fn decoder_fn<T>(f: T) -> DecoderFn<T> {
-    DecoderFn { f }
-}
-
-pub struct DecoderFn<T> {
-    f: T,
-}
-
-impl<T, E> Decoder for DecoderFn<T>
+impl<F, E> Decoder for F
 where
-    T: Fn(&[u8], &[u8]) -> Result<Instance, E>,
+    F: Fn(&[u8]) -> Result<Instance, E>,
 {
     type Error = E;
-    fn decode(&self, key: &[u8], value: &[u8]) -> Result<Instance, Self::Error> {
-        (self.f)(key, value)
+    fn decode(&self, data: &[u8]) -> Result<Instance, Self::Error> {
+        self(data)
     }
 }
 
-pub struct Codec<KeyEncoder, ValueEncoder, D> {
-    key_encoder: KeyEncoder,
-    value_encoder: ValueEncoder,
+pub struct Codec<E, D> {
+    encoder: E,
     decoder: D,
 }
 
-impl<KeyEncoder, ValueEncoder, D> Codec<KeyEncoder, ValueEncoder, D>
+impl<E, D> Codec<E, D>
 where
-    KeyEncoder: Encoder,
-    ValueEncoder: Encoder,
+    E: Encoder,
     D: Decoder,
 {
-    pub fn new(key_encoder: KeyEncoder, value_encoder: ValueEncoder, decoder: D) -> Self {
-        Self {
-            key_encoder,
-            value_encoder,
-            decoder,
-        }
+    pub fn new(encoder: E, decoder: D) -> Self {
+        Self { encoder, decoder }
     }
 
-    pub fn get_key_encoder_ref(&self) -> &KeyEncoder {
-        &self.key_encoder
-    }
-
-    pub fn get_value_encoder_ref(&self) -> &ValueEncoder {
-        &self.value_encoder
+    pub fn get_encoder_ref(&self) -> &E {
+        &self.encoder
     }
 
     pub fn get_decoder_ref(&self) -> &D {
@@ -91,19 +63,31 @@ const URL_ENCODE_SET: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'.')
     .remove(b'_');
 
+#[derive(Debug)]
+pub enum DefaultCodecError {
+    UTF8(Utf8Error),
+    MetadataSerde(serde_json::Error),
+}
+
+impl From<Utf8Error> for DefaultCodecError {
+    fn from(e: Utf8Error) -> Self {
+        DefaultCodecError::UTF8(e)
+    }
+}
+
 pub fn new_default_codec() -> Codec<
-    EncoderFn<impl Fn(&Instance) -> Result<Vec<u8>, String>>,
-    EncoderFn<impl Fn(&Instance) -> Result<Vec<u8>, String>>,
-    DecoderFn<impl Fn(&[u8], &[u8]) -> Result<Instance, String>>,
+    impl Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
+    impl Fn(&[u8]) -> Result<Instance, DefaultCodecError>,
 > {
     Codec::new(
-        encoder_fn(|ins: &Instance| -> Result<_, String> { Ok(ins.appid.clone().into_bytes()) }),
-        encoder_fn(|ins: &Instance| -> Result<_, String> {
+        |ins: &Instance| -> Result<_, DefaultCodecError> {
             let mut s = String::new();
             s.push_str("zone=");
             s.extend(utf8_percent_encode(&ins.zone, URL_ENCODE_SET));
             s.push_str("&env=");
             s.extend(utf8_percent_encode(&ins.env, URL_ENCODE_SET));
+            s.push_str("&appid=");
+            s.extend(utf8_percent_encode(&ins.appid, URL_ENCODE_SET));
             s.push_str("&hostname=");
             s.extend(utf8_percent_encode(&ins.hostname, URL_ENCODE_SET));
             for addr in ins.addrs.iter() {
@@ -114,14 +98,15 @@ pub fn new_default_codec() -> Codec<
             s.extend(utf8_percent_encode(&ins.version, URL_ENCODE_SET));
             s.push_str("&metadata=");
             s.extend(utf8_percent_encode(
-                &(serde_json::to_string(&ins.metadata).map_err(|err| err.to_string())?),
+                &(serde_json::to_string(&ins.metadata)
+                    .map_err(|e| DefaultCodecError::MetadataSerde(e))?),
                 URL_ENCODE_SET,
             ));
             Ok(s.into_bytes())
-        }),
-        decoder_fn(|key: &[u8], value: &[u8]| -> Result<_, String> {
+        },
+        |data: &[u8]| -> Result<_, DefaultCodecError> {
             let mut ins = Instance::default();
-            let value = std::str::from_utf8(value).map_err(|err| err.to_string())?;
+            let value = std::str::from_utf8(data)?;
 
             let pair_iter = value.split('&').map(|pair| {
                 let pair = pair.splitn(2, '=').collect::<Vec<&str>>();
@@ -135,26 +120,24 @@ pub fn new_default_codec() -> Codec<
             for (k, v) in pair_iter {
                 let v = percent_decode_str(v)
                     .decode_utf8()
-                    .map_err(|err| err.to_string())?;
+                    .map_err(|err| DefaultCodecError::UTF8(err))?;
 
                 match k {
                     "zone" => ins.zone = v.into_owned(),
                     "env" => ins.env = v.into_owned(),
+                    "appid" => ins.appid = v.into_owned(),
                     "hostname" => ins.env = v.into_owned(),
                     "addrs" => ins.addrs.push(v.into_owned()),
                     "version" => ins.version = v.into_owned(),
                     "metadata" => {
-                        ins.metadata =
-                            serde_json::from_str(v.as_ref()).map_err(|err| err.to_string())?
+                        ins.metadata = serde_json::from_str(v.as_ref())
+                            .map_err(|e| DefaultCodecError::MetadataSerde(e))?
                     }
                     _ => {}
                 }
             }
-            ins.appid = std::str::from_utf8(key)
-                .map_err(|err| err.to_string())?
-                .to_owned();
             Ok(ins)
-        }),
+        },
     )
 }
 
@@ -167,7 +150,7 @@ mod tests {
     use serde_json::Number;
 
     #[test]
-    fn test_default_value_encoder_encode() {
+    fn test_default_encoder_encode() {
         let cases = [
             (Instance {
                 zone: "sh1".to_owned(),
@@ -177,25 +160,14 @@ mod tests {
                 addrs: vec!["http://172.1.1.1:8000".to_owned(), "grpc://172.1.1.1:9999".to_owned()],
                 version: "111".to_owned(),
                 metadata: [("weight".to_owned(), Value::Number(Number::from(10)))].iter().cloned().collect()
-            }, "zone=sh1&env=test&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A10%7D")
+            }, "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A10%7D")
         ];
         let codec = new_default_codec();
-        let value_encoder = codec.get_value_encoder_ref();
+        let encoder = codec.get_encoder_ref();
         for case in cases.iter() {
-            let res = value_encoder.encode(&case.0);
+            let res = encoder.encode(&case.0);
             assert!(res.is_ok());
             assert_eq!(case.1, String::from_utf8(res.unwrap()).unwrap());
         }
-    }
-
-    #[test]
-    fn test_default_key_encoder_encode() {
-        let mut ins = Instance::default();
-        ins.appid = "卢本伟牛逼".to_owned();
-        let codec = new_default_codec();
-        let key_encoder = codec.get_key_encoder_ref();
-        let res = key_encoder.encode(&ins);
-        assert!(res.is_ok());
-        assert_eq!(ins.appid, String::from_utf8(res.unwrap()).unwrap());
     }
 }

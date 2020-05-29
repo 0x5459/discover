@@ -6,6 +6,7 @@ use watcher::{Event, WatchEvent};
 
 mod codec;
 mod watcher;
+mod zk;
 
 type Value = serde_json::Value;
 
@@ -37,7 +38,7 @@ pub trait Registry {
 }
 
 #[pin_project]
-struct AppDiscover<SB, R>
+pub struct AppDiscover<SB, R>
 where
     R: Registry,
 {
@@ -67,7 +68,7 @@ where
 {
     type Key = String;
     type Service = S;
-    type Error = String;
+    type Error = Terminated;
 
     fn poll_discover(
         mut self: std::pin::Pin<&mut Self>,
@@ -85,10 +86,12 @@ where
                     )),
                     Event::Delete(ins) => Ok(Change::Remove(ins.appid)),
                 },
-                None => Err("mother fuck".to_owned()),
+                None => Err(Terminated),
             })
     }
 }
+
+pub struct Terminated;
 
 #[cfg(test)]
 mod tests {
