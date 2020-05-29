@@ -11,22 +11,25 @@ use std::{
     time::Duration,
 };
 use tokio::task;
+use tokio::task::JoinError;
 use tokio::task::JoinHandle;
 use zookeeper::{
     Acl, CreateMode, WatchedEvent, Watcher as ZookeeperWatcher, ZkError, ZooKeeper, ZooKeeperExt,
 };
 
-struct Zk<'a, EC, DE> {
+mod zk_watcher;
+
+struct Zk<'a, EC, DC> {
     client: Arc<ZooKeeper>,
-    codec: &'a Codec<EC, DE>,
+    codec: &'a Codec<EC, DC>,
 }
 
-impl<'a, EC, DE> Zk<'a, EC, DE> {
+impl<'a, EC, DC> Zk<'a, EC, DC> {
     fn new(
         zk_urls: &str,
         timeout: Duration,
-        codec: &'a Codec<EC, DE>,
-    ) -> impl Future<Output = Self> {
+        codec: &'a Codec<EC, DC>,
+    ) -> impl Future<Output = Zk<'a, EC, DC>> {
         let zk_urls = zk_urls.to_string();
 
         task::spawn_blocking(move || Zk {
@@ -40,7 +43,7 @@ impl<'a, EC, DE> Zk<'a, EC, DE> {
 #[pin_project]
 struct RegFut {
     #[pin]
-    join_handle: JoinHandle<Result<(), String>>,
+    join_handle: JoinHandle<Result<(), ZkRegError>>,
 }
 
 impl RegFut {
@@ -80,10 +83,13 @@ impl RegFut {
 }
 
 impl Future for RegFut {
-    type Output = Result<(), String>;
+    type Output = Result<(), ZkRegError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        Poll::Ready(ready!(self.project().join_handle.poll(cx)).unwrap())
+        Poll::Ready(match ready!(self.project().join_handle.poll(cx)) {
+            Ok(out) => out,
+            Err(e) => Err(ZkRegError::Join(e)),
+        })
     }
 }
 
@@ -91,6 +97,7 @@ pub enum ZkRegError {
     Codec(DefaultCodecError),
     CreatePath(ZkError),
     DeletePath(ZkError),
+    Join(JoinError),
 }
 
 impl From<DefaultCodecError> for ZkRegError {
@@ -102,7 +109,7 @@ impl From<DefaultCodecError> for ZkRegError {
 #[pin_project]
 struct DeRegFut {
     #[pin]
-    join_handle: JoinHandle<Result<(), String>>,
+    join_handle: JoinHandle<Result<(), ZkRegError>>,
 }
 
 impl DeRegFut {
@@ -118,7 +125,7 @@ impl DeRegFut {
 }
 
 impl Future for DeRegFut {
-    type Output = Result<(), String>;
+    type Output = Result<(), ZkRegError>;
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         Poll::Ready(ready!(self.project().join_handle.poll(cx)).unwrap())

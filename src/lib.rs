@@ -1,4 +1,5 @@
 use futures::{Future, Stream};
+use fxhash;
 use pin_project::pin_project;
 use std::collections::HashMap;
 use tower::discover::{Change, Discover};
@@ -7,6 +8,8 @@ use watcher::{Event, WatchEvent};
 mod codec;
 mod watcher;
 mod zk;
+
+pub type HashSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault<fxhash::FxHasher>>;
 
 type Value = serde_json::Value;
 
