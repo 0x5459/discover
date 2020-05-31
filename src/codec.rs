@@ -1,9 +1,12 @@
 use crate::Instance;
+use fmt::{Debug, Display};
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet};
-use std::str::Utf8Error;
+use std::{fmt, str::Utf8Error};
+
+pub struct EncodeErorr {}
 
 pub trait Encoder {
-    type Error;
+    type Error: Into<EncodeErorr> + Display + Debug;
 
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error>;
 }
@@ -11,6 +14,7 @@ pub trait Encoder {
 impl<F, E> Encoder for F
 where
     F: Fn(&Instance) -> Result<Vec<u8>, E>,
+    E: Into<EncodeErorr> + Display + Debug,
 {
     type Error = E;
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error> {
@@ -18,8 +22,10 @@ where
     }
 }
 
+pub struct DecodeErorr {}
+
 pub trait Decoder {
-    type Error;
+    type Error: Into<DecodeErorr> + Display + Debug;
 
     fn decode(&self, data: &[u8]) -> Result<Instance, Self::Error>;
 }
@@ -27,6 +33,7 @@ pub trait Decoder {
 impl<F, E> Decoder for F
 where
     F: Fn(&[u8]) -> Result<Instance, E>,
+    E: Into<DecodeErorr> + Display + Debug,
 {
     type Error = E;
     fn decode(&self, data: &[u8]) -> Result<Instance, Self::Error> {
@@ -64,14 +71,32 @@ const URL_ENCODE_SET: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'_');
 
 #[derive(Debug)]
-pub enum DefaultCodecError {
+enum DefaultCodecError {
     UTF8(Utf8Error),
     MetadataSerde(serde_json::Error),
+}
+
+impl fmt::Display for DefaultCodecError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "DefaultCodecError")
+    }
 }
 
 impl From<Utf8Error> for DefaultCodecError {
     fn from(e: Utf8Error) -> Self {
         DefaultCodecError::UTF8(e)
+    }
+}
+
+impl From<DefaultCodecError> for EncodeErorr {
+    fn from(_: DefaultCodecError) -> Self {
+        todo!()
+    }
+}
+
+impl From<DefaultCodecError> for DecodeErorr {
+    fn from(_: DefaultCodecError) -> Self {
+        todo!()
     }
 }
 
@@ -146,8 +171,7 @@ mod tests {
 
     use super::new_default_codec;
     use super::Encoder;
-    use crate::{Instance, Value};
-    use serde_json::Number;
+    use crate::Instance;
 
     #[test]
     fn test_default_encoder_encode() {
@@ -159,7 +183,7 @@ mod tests {
                 hostname: "myhostname".to_owned(),
                 addrs: vec!["http://172.1.1.1:8000".to_owned(), "grpc://172.1.1.1:9999".to_owned()],
                 version: "111".to_owned(),
-                metadata: [("weight".to_owned(), Value::Number(Number::from(10)))].iter().cloned().collect()
+                metadata: [("weight".to_owned(), "10".to_owned())].iter().cloned().collect()
             }, "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A10%7D")
         ];
         let codec = new_default_codec();

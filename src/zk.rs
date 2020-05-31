@@ -1,5 +1,5 @@
 use crate::{
-    codec::{Codec, Decoder, DefaultCodecError, Encoder},
+    codec::{Codec, DecodeErorr, Decoder, EncodeErorr, Encoder},
     Instance, Registry,
 };
 use futures::{ready, Future, FutureExt};
@@ -13,23 +13,30 @@ use std::{
 use tokio::task;
 use tokio::task::JoinError;
 use tokio::task::JoinHandle;
-use zookeeper::{
-    Acl, CreateMode, WatchedEvent, Watcher as ZookeeperWatcher, ZkError, ZooKeeper, ZooKeeperExt,
-};
+use zk_watcher::ZkWatcher;
+use zookeeper::{Acl, CreateMode, ZkError, ZooKeeper, ZooKeeperExt};
 
 mod zk_watcher;
 
-struct Zk<'a, EC, DC> {
+struct Zk<EC, DC>
+where
+    EC: 'static,
+    DC: 'static,
+{
     client: Arc<ZooKeeper>,
-    codec: &'a Codec<EC, DC>,
+    codec: &'static Codec<EC, DC>,
 }
 
-impl<'a, EC, DC> Zk<'a, EC, DC> {
+impl<EC, DC> Zk<EC, DC>
+where
+    EC: Sync,
+    DC: Sync,
+{
     fn new(
         zk_urls: &str,
         timeout: Duration,
-        codec: &'a Codec<EC, DC>,
-    ) -> impl Future<Output = Zk<'a, EC, DC>> {
+        codec: &'static Codec<EC, DC>,
+    ) -> impl Future<Output = Zk<EC, DC>> {
         let zk_urls = zk_urls.to_string();
 
         task::spawn_blocking(move || Zk {
@@ -47,20 +54,23 @@ struct RegFut {
 }
 
 impl RegFut {
-    pub fn new<EC, DE>(
+    pub fn new<EC, DC>(
         client: Arc<ZooKeeper>,
-        ins: &Instance,
-        codec: &Codec<EC, DE>,
+        ins: Instance,
+        codec: &'static Codec<EC, DC>,
         dynamic: bool,
     ) -> Self
     where
-        EC: Encoder,
-        DE: Decoder,
+        EC: Encoder + Sync + 'static,
+        DC: Decoder + Sync + 'static,
     {
         let encoder = codec.get_encoder_ref();
+
         RegFut {
             join_handle: task::spawn_blocking(move || {
-                let data = encoder.encode(ins)?;
+                let data = encoder
+                    .encode(&ins)
+                    .map_err(|e| -> EncodeErorr { e.into() })?;
                 client
                     .ensure_path(ins.appid.as_str())
                     .map_err(|e| ZkRegError::CreatePath(e))?;
@@ -94,15 +104,22 @@ impl Future for RegFut {
 }
 
 pub enum ZkRegError {
-    Codec(DefaultCodecError),
+    Encode,
+    Decode,
     CreatePath(ZkError),
     DeletePath(ZkError),
     Join(JoinError),
 }
 
-impl From<DefaultCodecError> for ZkRegError {
-    fn from(e: DefaultCodecError) -> Self {
-        ZkRegError::Codec(e)
+impl From<EncodeErorr> for ZkRegError {
+    fn from(e: EncodeErorr) -> Self {
+        todo!()
+    }
+}
+
+impl From<DecodeErorr> for ZkRegError {
+    fn from(e: DecodeErorr) -> Self {
+        todo!()
     }
 }
 
@@ -113,11 +130,11 @@ struct DeRegFut {
 }
 
 impl DeRegFut {
-    fn new(client: Arc<ZooKeeper>, path: &str) -> Self {
+    fn new(client: Arc<ZooKeeper>, path: String) -> Self {
         DeRegFut {
             join_handle: task::spawn_blocking(move || {
                 client
-                    .delete(path, None)
+                    .delete(path.as_str(), None)
                     .map_err(|e| ZkRegError::DeletePath(e))
             }),
         }
@@ -132,24 +149,33 @@ impl Future for DeRegFut {
     }
 }
 
-impl<'a, EC, DE> Registry for Zk<'a, EC, DE> {
+impl<EC, DC> Registry for Zk<EC, DC>
+where
+    EC: Encoder + Sync + 'static,
+    DC: Decoder + Sync + 'static,
+{
     type Error = ZkRegError;
 
     type RegFuture = RegFut;
 
     type DeRegFuture = DeRegFut;
 
-    type Watcher = ZkWatcher;
+    type Watcher = ZkWatcher<EC, DC>;
 
     fn register(&self, ins: Instance) -> Self::RegFuture {
-        RegFut::new(self.client.clone(), ins, e.dynamic)
+        let dynamic = ins
+            .metadata
+            .get("dynamic")
+            .map(|v| v == "true")
+            .unwrap_or(true);
+        RegFut::new(self.client.clone(), ins, self.codec, dynamic)
     }
 
     fn deregister(&self, ins: &Instance) -> Self::DeRegFuture {
-        DeRegFut::new(self.client.clone(), e.to_dubbo_path())
+        DeRegFut::new(self.client.clone(), ins.appid.to_owned())
     }
 
-    fn watch(&self, appid: &str) -> Self::Watcher {
-        ZkWatcher::new(self.client.clone(), en)
+    fn watch(&self, appid: &'static str) -> Self::Watcher {
+        ZkWatcher::new(self.client.clone(), appid, self.codec)
     }
 }

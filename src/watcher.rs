@@ -1,23 +1,24 @@
 use crate::Instance;
 use futures::Stream;
 use std::time::SystemTime;
+
 #[derive(PartialEq, Eq, Debug)]
-pub enum Event<'a> {
-    Create(&'a Instance),
-    Delete(&'a Instance),
+pub enum Event {
+    Create(Box<Instance>),
+    Delete(Box<Instance>),
 }
 
 pub trait Watcher: Stream {}
 
-impl<'a, T> Watcher for T where T: Stream<Item = WatchEvent<'a>> {}
+impl<T> Watcher for T where T: Stream<Item = WatchEvent> {}
 
 #[derive(Debug)]
-pub struct WatchEvent<'a> {
-    pub event: Event<'a>,
+pub struct WatchEvent {
+    pub event: Event,
     pub timestamp: SystemTime,
 }
 
-impl<'a> WatchEvent<'a> {
+impl<'a> WatchEvent {
     pub fn new(event: Event) -> WatchEvent {
         WatchEvent {
             event,

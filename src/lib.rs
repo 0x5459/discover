@@ -1,7 +1,7 @@
 use futures::{Future, Stream};
 use fxhash;
 use pin_project::pin_project;
-use std::collections::HashMap;
+use std::{collections::HashMap, hash::Hash};
 use tower::discover::{Change, Discover};
 use watcher::{Event, WatchEvent};
 
@@ -11,8 +11,6 @@ mod zk;
 
 pub type HashSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault<fxhash::FxHasher>>;
 
-type Value = serde_json::Value;
-
 #[derive(Debug, Default, PartialEq, Eq)]
 pub struct Instance {
     zone: String,
@@ -21,7 +19,16 @@ pub struct Instance {
     hostname: String,
     addrs: Vec<String>,
     version: String,
-    metadata: HashMap<String, Value>,
+    metadata: HashMap<String, String>,
+}
+
+impl Hash for Instance {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.appid.hash(state);
+        self.version.hash(state);
+        self.env.hash(state);
+        self.addrs.hash(state);
+    }
 }
 
 pub trait Registry {
@@ -37,7 +44,7 @@ pub trait Registry {
 
     fn deregister(&self, e: &Instance) -> Self::DeRegFuture;
 
-    fn watch(&self, appid: &str) -> Self::Watcher;
+    fn watch(&self, appid: &'static str) -> Self::Watcher;
 }
 
 #[pin_project]
@@ -51,10 +58,9 @@ where
     service_creater: SB,
 }
 
-impl<SB, R, S> AppDiscover<SB, R>
+impl<SB, R> AppDiscover<SB, R>
 where
     R: Registry,
-    SB: Fn(Instance) -> S,
 {
     pub fn new<W>(watcher: R::Watcher, service_creater: SB) -> Self {
         Self {
@@ -67,7 +73,7 @@ where
 impl<SB, R, S> Discover for AppDiscover<SB, R>
 where
     R: Registry,
-    SB: Fn(Instance) -> S,
+    SB: Fn(&Instance) -> S,
 {
     type Key = String;
     type Service = S;
@@ -87,7 +93,7 @@ where
                         ins.appid.clone(),
                         (self.as_mut().project().service_creater)(ins),
                     )),
-                    Event::Delete(ins) => Ok(Change::Remove(ins.appid)),
+                    Event::Delete(ins) => Ok(Change::Remove(ins.appid.clone())),
                 },
                 None => Err(Terminated),
             })
