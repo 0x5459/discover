@@ -24,7 +24,7 @@ where
     codec: &'static Codec<EC, DC>,
     #[pin]
     rx: mpsc::UnboundedReceiver<WatchEvent>,
-    instances: Arc<Mutex<HashSet<Instance>>>,
+    instances: Arc<Mutex<HashSet<Arc<Instance>>>>,
 }
 
 impl<EC, DC> ZkWatcher<EC, DC> {
@@ -41,9 +41,9 @@ impl<EC, DC> ZkWatcher<EC, DC> {
                 .get_children_w(
                     appid,
                     ZkInstanceWatchHandler {
-                        client: zk_client,
+                        client: zk_client.clone(),
                         codec,
-                        tx,
+                        tx: tx.clone(),
                     },
                 )
                 .unwrap_or(vec![]); // todo error
@@ -55,18 +55,18 @@ impl<EC, DC> ZkWatcher<EC, DC> {
                     error!("[ZkWather] instance decode error {}", e);
                     return;
                 }
-                let ins = Box::new(ins.unwrap());
-                tx.start_send(WatchEvent::new(Event::Create(ins)));
+                let ins = Arc::new(ins.unwrap());
+                tx.start_send(WatchEvent::new(Event::Create(ins.clone())));
                 let exits = zk_client.exists_w(
                     appid,
                     ZkInstanceItemWatchHandler {
                         client: zk_client.clone(),
-                        ins: Box::new(ins),
+                        ins: ins.clone(),
                         tx: tx.clone(),
                     },
                 );
                 if let Ok(None) = exits {
-                    tx.start_send(WatchEvent::new(Event::Delete(&ins)));
+                    tx.start_send(WatchEvent::new(Event::Delete(ins)));
                 }
             });
         });
@@ -93,13 +93,13 @@ where
     ) -> Poll<Option<Self::Item>> {
         let event_opt: Option<Self::Item> = ready!(self.as_mut().project().rx.poll_next(cx));
         match event_opt {
-            Some(ref e) => match e.event {
+            Some(ref e) => match &e.event {
                 Event::Create(ins) => {
                     if self.instances.lock().unwrap().contains(ins.as_ref()) {
                         cx.waker().wake_by_ref();
                         Poll::Pending
                     } else {
-                        self.instances.lock().unwrap().insert(*ins);
+                        self.instances.lock().unwrap().insert(ins.clone());
                         Poll::Ready(event_opt)
                     }
                 }
@@ -137,7 +137,8 @@ where
         if we.path.is_none() {
             return;
         }
-        let path = we.path.unwrap().as_str();
+        let path = we.path.unwrap();
+        let path = path.as_str();
         let instances = self
             .client
             .get_children_w(
@@ -161,19 +162,19 @@ where
                 );
                 return;
             }
-            let ins = ins.unwrap();
-            tx.start_send(WatchEvent::new(Event::Create(&ins)));
+            let ins = Arc::new(ins.unwrap());
+            tx.start_send(WatchEvent::new(Event::Create(ins.clone())));
             let exits = self.client.exists_w(
                 path,
                 ZkInstanceItemWatchHandler {
                     client: self.client.clone(),
-                    ins: &ins,
+                    ins: ins.clone(),
                     tx: tx.clone(),
                 },
             );
 
             if let Ok(None) = exits {
-                tx.unbounded_send(WatchEvent::new(Event::Delete(&ins))).ok();
+                tx.unbounded_send(WatchEvent::new(Event::Delete(ins))).ok();
             }
         });
     }
@@ -181,7 +182,7 @@ where
 
 struct ZkInstanceItemWatchHandler {
     client: Arc<ZooKeeper>,
-    ins: Box<Instance>,
+    ins: Arc<Instance>,
     tx: mpsc::UnboundedSender<WatchEvent>,
 }
 
@@ -193,12 +194,12 @@ impl Watcher for ZkInstanceItemWatchHandler {
         match we.event_type {
             zookeeper::WatchedEventType::NodeCreated => {
                 self.tx
-                    .unbounded_send(WatchEvent::new(Event::Create(self.ins.as_ref())))
+                    .unbounded_send(WatchEvent::new(Event::Create(self.ins.clone())))
                     .ok();
             }
             zookeeper::WatchedEventType::NodeDeleted => {
                 self.tx
-                    .unbounded_send(WatchEvent::new(Event::Delete(self.ins.as_ref())))
+                    .unbounded_send(WatchEvent::new(Event::Delete(self.ins.clone())))
                     .ok();
             }
             _ => {}
@@ -208,13 +209,13 @@ impl Watcher for ZkInstanceItemWatchHandler {
             we.path.unwrap().as_str(),
             ZkInstanceItemWatchHandler {
                 client: self.client.clone(),
-                ins: self.ins,
+                ins: self.ins.clone(),
                 tx: self.tx.clone(),
             },
         );
         if let Ok(None) = exits {
             self.tx
-                .unbounded_send(WatchEvent::new(Event::Delete(&self.ins)))
+                .unbounded_send(WatchEvent::new(Event::Delete(self.ins.clone())))
                 .ok();
         }
     }

@@ -71,7 +71,7 @@ const URL_ENCODE_SET: &AsciiSet = &percent_encoding::NON_ALPHANUMERIC
     .remove(b'_');
 
 #[derive(Debug)]
-enum DefaultCodecError {
+pub enum DefaultCodecError {
     UTF8(Utf8Error),
     MetadataSerde(serde_json::Error),
 }

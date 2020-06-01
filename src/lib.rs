@@ -91,7 +91,7 @@ where
                 Some(watch_event) => match watch_event.event {
                     Event::Create(ins) => Ok(Change::Insert(
                         ins.appid.clone(),
-                        (self.as_mut().project().service_creater)(ins),
+                        (self.as_mut().project().service_creater)(ins.as_ref()),
                     )),
                     Event::Delete(ins) => Ok(Change::Remove(ins.appid.clone())),
                 },
