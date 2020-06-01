@@ -184,7 +184,7 @@ mod tests {
                 addrs: vec!["http://172.1.1.1:8000".to_owned(), "grpc://172.1.1.1:9999".to_owned()],
                 version: "111".to_owned(),
                 metadata: [("weight".to_owned(), "10".to_owned())].iter().cloned().collect()
-            }, "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A10%7D")
+            }, "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D")
         ];
         let codec = new_default_codec();
         let encoder = codec.get_encoder_ref();

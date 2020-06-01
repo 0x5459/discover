@@ -30,8 +30,8 @@ where
 impl<EC, DC> ZkWatcher<EC, DC> {
     pub fn new(client: Arc<ZooKeeper>, appid: &'static str, codec: &'static Codec<EC, DC>) -> Self
     where
-        EC: Encoder + Sync + 'static,
-        DC: Decoder + Sync + 'static,
+        EC: Encoder + Sync,
+        DC: Decoder + Sync,
     {
         let (mut tx, rx) = mpsc::unbounded();
         let zk_client = client.clone();
@@ -130,8 +130,8 @@ where
 
 impl<EC, DC> Watcher for ZkInstanceWatchHandler<EC, DC>
 where
-    EC: Encoder + Sync + 'static,
-    DC: Decoder + Sync + 'static,
+    EC: Encoder + Sync,
+    DC: Decoder + Sync,
 {
     fn handle(&self, we: WatchedEvent) {
         if we.path.is_none() {
