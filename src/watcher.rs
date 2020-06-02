@@ -18,7 +18,7 @@ pub struct WatchEvent {
     pub timestamp: SystemTime,
 }
 
-impl<'a> WatchEvent {
+impl WatchEvent {
     pub fn new(event: Event) -> WatchEvent {
         WatchEvent {
             event,

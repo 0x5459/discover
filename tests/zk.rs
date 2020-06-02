@@ -1,5 +1,12 @@
+use discover::codec;
+use discover::codec::DEFAULT_CODEC;
+use discover::zk::Zk;
+use discover::Instance;
+use discover::Registry;
 use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
+use std::time::Duration;
+use zookeeper::ZooKeeper;
 
 pub struct ZkCluster {
     process: Child,
@@ -56,3 +63,100 @@ impl Drop for ZkCluster {
         self.shutdown()
     }
 }
+
+#[cfg(test)]
+#[tokio::test(threaded_scheduler)]
+async fn test_register_deregister() {
+    let cluster = ZkCluster::start(3);
+    let zk = Zk::new(
+        &cluster.connect_string,
+        Duration::from_millis(3000),
+        &DEFAULT_CODEC,
+    )
+    .await;
+
+    let ins = Instance {
+        zone: "sh1".to_owned(),
+        env: "test".to_owned(),
+        appid: "provider".to_owned(),
+        hostname: "myhostname".to_owned(),
+        addrs: vec![
+            "http://172.1.1.1:8000".to_owned(),
+            "grpc://172.1.1.1:9999".to_owned(),
+        ],
+        version: "111".to_owned(),
+        metadata: [("weight".to_owned(), "10".to_owned())]
+            .iter()
+            .cloned()
+            .collect(),
+    };
+
+    let _ = zk.register(ins.clone()).await;
+
+    let zk_client =
+        ZooKeeper::connect(&cluster.connect_string, Duration::from_millis(3000), |_| {}).unwrap();
+    let path = "/dubbo-rs/com.dubbo.Test/providers/dubbo%3A%2F%2F127%2E0%2E0%2E1%3A20881%2Fcom%2Edubbo%2ETest%3Fversion%3D1%2E0%2E1%26group%3Dlocal%26dynamic%3Dtrue%26register%3Dfalse%26interface%3Dcom%2Edubbo%2ETest%26methods%3D";
+    assert!(zk_client.exists(path, false).unwrap().is_some());
+
+    let _ = zk.deregister(&ins).await;
+    assert!(zk_client.exists(path, false).unwrap().is_none());
+}
+
+// #[tokio::test(threaded_scheduler)]
+// async fn test_watch() {
+//     let cluster = ZkCluster::start(3);
+
+//     let zk = Zk::new(&cluster.connect_string).await;
+
+//     let s1 = endpoint::Endpoint {
+//         name: "com.dubbo.Test".into(),
+//         version: "1.0.1".to_string(),
+//         group: "local".to_string(),
+//         protocol: "dubbo".to_string(),
+//         address: "127.0.0.1".parse().unwrap(),
+//         port: 20881,
+//         java_interface: "com.dubbo.Test".to_string(),
+//         dynamic: true,
+//         register: false,
+//         methods: vec![],
+//         metadata: Default::default(),
+//     };
+
+//     let s2 = endpoint::Endpoint {
+//         name: "com.dubbo.Test".into(),
+//         version: "1.0.1".to_string(),
+//         group: "local".to_string(),
+//         protocol: "dubbo".to_string(),
+//         address: "127.0.0.2".parse().unwrap(),
+//         port: 20881,
+//         java_interface: "com.dubbo.Test".to_string(),
+//         dynamic: true,
+//         register: false,
+//         methods: vec![],
+//         metadata: Default::default(),
+//     };
+
+//     let _ = zk.register(&s1).await;
+
+//     let watcher = zk.watch(&("com.dubbo.Test".into()));
+
+//     let _ = zk.register(&s2).await;
+
+//     let _ = zk.deregister(&s1).await;
+
+//     let _ = zk.deregister(&s2).await;
+
+//     watcher
+//         .for_each(|e| {
+//             match &e.event {
+//                 crate::registry::watcher::Event::Create(endpoint) => {
+//                     println!("创建 {:?}", endpoint);
+//                 }
+//                 crate::registry::watcher::Event::Delete(endpoint) => {
+//                     println!("删除 {:?}", endpoint);
+//                 }
+//             }
+//             future::ready(())
+//         })
+//         .await;
+// }

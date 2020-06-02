@@ -5,13 +5,13 @@ use std::{collections::HashMap, hash::Hash};
 use tower::discover::{Change, Discover};
 use watcher::{Event, WatchEvent};
 
-mod codec;
+pub mod codec;
 mod watcher;
-mod zk;
+pub mod zk;
 
 pub type HashSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault<fxhash::FxHasher>>;
 
-#[derive(Debug, Default, PartialEq, Eq)]
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct Instance {
     zone: String,
     env: String,

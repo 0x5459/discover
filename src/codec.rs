@@ -1,5 +1,6 @@
 use crate::Instance;
 use fmt::{Debug, Display};
+use lazy_static::lazy_static;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet};
 use std::{fmt, str::Utf8Error};
 
@@ -164,6 +165,15 @@ pub fn new_default_codec() -> Codec<
             Ok(ins)
         },
     )
+}
+
+lazy_static! {
+    static ref DEFAULT_CODEC: Box<
+        Codec<
+            dyn Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
+            dyn Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
+        >,
+    > = Box::new(new_default_codec());
 }
 
 #[cfg(test)]

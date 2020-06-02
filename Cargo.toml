@@ -16,6 +16,10 @@ zookeeper = "0.5"
 tokio = {version = "0.2", features = ["blocking"]}
 fxhash = "0.2"
 log = "0.4"
+lazy_static = "1.4"
+
+[dev-dependencies]
+tokio = { version = "0.2", features = ["full"] }
 
 [[test]]
 name = "test"

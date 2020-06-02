@@ -18,7 +18,7 @@ use zookeeper::{Acl, CreateMode, ZkError, ZooKeeper, ZooKeeperExt};
 
 mod zk_watcher;
 
-struct Zk<EC, DC>
+pub struct Zk<EC, DC>
 where
     EC: 'static,
     DC: 'static,
@@ -32,7 +32,7 @@ where
     EC: Sync,
     DC: Sync,
 {
-    fn new(
+    pub fn new(
         zk_urls: &str,
         timeout: Duration,
         codec: &'static Codec<EC, DC>,
@@ -48,7 +48,7 @@ where
 }
 
 #[pin_project]
-struct RegFut {
+pub struct RegFut {
     #[pin]
     join_handle: JoinHandle<Result<(), ZkRegError>>,
 }
@@ -124,13 +124,13 @@ impl From<DecodeErorr> for ZkRegError {
 }
 
 #[pin_project]
-struct DeRegFut {
+pub struct DeRegFut {
     #[pin]
     join_handle: JoinHandle<Result<(), ZkRegError>>,
 }
 
 impl DeRegFut {
-    fn new(client: Arc<ZooKeeper>, path: String) -> Self {
+    pub fn new(client: Arc<ZooKeeper>, path: String) -> Self {
         DeRegFut {
             join_handle: task::spawn_blocking(move || {
                 client
