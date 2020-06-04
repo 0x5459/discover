@@ -13,13 +13,13 @@ pub type HashSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 pub struct Instance {
-    zone: String,
-    env: String,
-    appid: String,
-    hostname: String,
-    addrs: Vec<String>,
-    version: String,
-    metadata: HashMap<String, String>,
+    pub zone: String,
+    pub env: String,
+    pub appid: String,
+    pub hostname: String,
+    pub addrs: Vec<String>,
+    pub version: String,
+    pub metadata: HashMap<String, String>,
 }
 
 impl Hash for Instance {
@@ -91,7 +91,7 @@ where
                 Some(watch_event) => match watch_event.event {
                     Event::Create(ins) => Ok(Change::Insert(
                         ins.appid.clone(),
-                        (self.as_mut().project().service_creater)(ins.as_ref()),
+                        (self.as_mut().project().service_creater)(&ins),
                     )),
                     Event::Delete(ins) => Ok(Change::Remove(ins.appid.clone())),
                 },

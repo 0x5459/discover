@@ -101,86 +101,91 @@ impl From<DefaultCodecError> for DecodeErorr {
     }
 }
 
-pub fn new_default_codec() -> Codec<
-    impl Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
-    impl Fn(&[u8]) -> Result<Instance, DefaultCodecError>,
-> {
-    Codec::new(
-        |ins: &Instance| -> Result<_, DefaultCodecError> {
-            let mut s = String::new();
-            s.push_str("zone=");
-            s.extend(utf8_percent_encode(&ins.zone, URL_ENCODE_SET));
-            s.push_str("&env=");
-            s.extend(utf8_percent_encode(&ins.env, URL_ENCODE_SET));
-            s.push_str("&appid=");
-            s.extend(utf8_percent_encode(&ins.appid, URL_ENCODE_SET));
-            s.push_str("&hostname=");
-            s.extend(utf8_percent_encode(&ins.hostname, URL_ENCODE_SET));
-            for addr in ins.addrs.iter() {
-                s.push_str("&addrs=");
-                s.extend(utf8_percent_encode(addr, URL_ENCODE_SET));
+pub struct DefaultEncoder;
+
+impl Encoder for DefaultEncoder {
+    type Error = DefaultCodecError;
+
+    fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error> {
+        let mut s = String::new();
+        s.push_str("zone=");
+        s.extend(utf8_percent_encode(&ins.zone, URL_ENCODE_SET));
+        s.push_str("&env=");
+        s.extend(utf8_percent_encode(&ins.env, URL_ENCODE_SET));
+        s.push_str("&appid=");
+        s.extend(utf8_percent_encode(&ins.appid, URL_ENCODE_SET));
+        s.push_str("&hostname=");
+        s.extend(utf8_percent_encode(&ins.hostname, URL_ENCODE_SET));
+        for addr in ins.addrs.iter() {
+            s.push_str("&addrs=");
+            s.extend(utf8_percent_encode(addr, URL_ENCODE_SET));
+        }
+        s.push_str("&version=");
+        s.extend(utf8_percent_encode(&ins.version, URL_ENCODE_SET));
+        s.push_str("&metadata=");
+        s.extend(utf8_percent_encode(
+            &(serde_json::to_string(&ins.metadata)
+                .map_err(|e| DefaultCodecError::MetadataSerde(e))?),
+            URL_ENCODE_SET,
+        ));
+        Ok(s.into_bytes())
+    }
+}
+
+pub struct DefaultDecoder;
+
+impl Decoder for DefaultDecoder {
+    type Error = DefaultCodecError;
+
+    fn decode(&self, data: &[u8]) -> Result<Instance, Self::Error> {
+        let mut ins = Instance::default();
+        let value = std::str::from_utf8(data)?;
+
+        let pair_iter = value.split('&').map(|pair| {
+            let pair = pair.splitn(2, '=').collect::<Vec<&str>>();
+            if pair.len() < 2 {
+                (unsafe { *pair.get_unchecked(0) }, "")
+            } else {
+                unsafe { (*pair.get_unchecked(0), *pair.get_unchecked(1)) }
             }
-            s.push_str("&version=");
-            s.extend(utf8_percent_encode(&ins.version, URL_ENCODE_SET));
-            s.push_str("&metadata=");
-            s.extend(utf8_percent_encode(
-                &(serde_json::to_string(&ins.metadata)
-                    .map_err(|e| DefaultCodecError::MetadataSerde(e))?),
-                URL_ENCODE_SET,
-            ));
-            Ok(s.into_bytes())
-        },
-        |data: &[u8]| -> Result<_, DefaultCodecError> {
-            let mut ins = Instance::default();
-            let value = std::str::from_utf8(data)?;
+        });
 
-            let pair_iter = value.split('&').map(|pair| {
-                let pair = pair.splitn(2, '=').collect::<Vec<&str>>();
-                if pair.len() < 2 {
-                    (unsafe { *pair.get_unchecked(0) }, "")
-                } else {
-                    unsafe { (*pair.get_unchecked(0), *pair.get_unchecked(1)) }
+        for (k, v) in pair_iter {
+            let v = percent_decode_str(v)
+                .decode_utf8()
+                .map_err(|err| DefaultCodecError::UTF8(err))?;
+
+            match k {
+                "zone" => ins.zone = v.into_owned(),
+                "env" => ins.env = v.into_owned(),
+                "appid" => ins.appid = v.into_owned(),
+                "hostname" => ins.env = v.into_owned(),
+                "addrs" => ins.addrs.push(v.into_owned()),
+                "version" => ins.version = v.into_owned(),
+                "metadata" => {
+                    ins.metadata = serde_json::from_str(v.as_ref())
+                        .map_err(|e| DefaultCodecError::MetadataSerde(e))?
                 }
-            });
-
-            for (k, v) in pair_iter {
-                let v = percent_decode_str(v)
-                    .decode_utf8()
-                    .map_err(|err| DefaultCodecError::UTF8(err))?;
-
-                match k {
-                    "zone" => ins.zone = v.into_owned(),
-                    "env" => ins.env = v.into_owned(),
-                    "appid" => ins.appid = v.into_owned(),
-                    "hostname" => ins.env = v.into_owned(),
-                    "addrs" => ins.addrs.push(v.into_owned()),
-                    "version" => ins.version = v.into_owned(),
-                    "metadata" => {
-                        ins.metadata = serde_json::from_str(v.as_ref())
-                            .map_err(|e| DefaultCodecError::MetadataSerde(e))?
-                    }
-                    _ => {}
-                }
+                _ => {}
             }
-            Ok(ins)
-        },
-    )
+        }
+        Ok(ins)
+    }
+}
+
+pub fn new_default_codec() -> Codec<DefaultEncoder, DefaultDecoder> {
+    Codec::new(DefaultEncoder, DefaultDecoder)
 }
 
 lazy_static! {
-    static ref DEFAULT_CODEC: Box<
-        Codec<
-            dyn Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
-            dyn Fn(&Instance) -> Result<Vec<u8>, DefaultCodecError>,
-        >,
-    > = Box::new(new_default_codec());
+    pub static ref DEFAULT_CODEC: Codec<DefaultEncoder, DefaultDecoder> = new_default_codec();
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::new_default_codec;
     use super::Encoder;
+    use super::DEFAULT_CODEC;
     use crate::Instance;
 
     #[test]
@@ -196,8 +201,7 @@ mod tests {
                 metadata: [("weight".to_owned(), "10".to_owned())].iter().cloned().collect()
             }, "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D")
         ];
-        let codec = new_default_codec();
-        let encoder = codec.get_encoder_ref();
+        let encoder = DEFAULT_CODEC.get_encoder_ref();
         for case in cases.iter() {
             let res = encoder.encode(&case.0);
             assert!(res.is_ok());

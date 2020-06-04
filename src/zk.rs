@@ -160,7 +160,7 @@ where
 
     type DeRegFuture = DeRegFut;
 
-    type Watcher = ZkWatcher<EC, DC>;
+    type Watcher = ZkWatcher;
 
     fn register(&self, ins: Instance) -> Self::RegFuture {
         let dynamic = ins
@@ -176,6 +176,6 @@ where
     }
 
     fn watch(&self, appid: &'static str) -> Self::Watcher {
-        ZkWatcher::new(self.client.clone(), appid, self.codec)
+        ZkWatcher::new(self.client.clone(), appid, self.codec.get_decoder_ref())
     }
 }

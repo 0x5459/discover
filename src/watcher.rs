@@ -1,11 +1,11 @@
 use crate::Instance;
 use futures::Stream;
-use std::{sync::Arc, time::SystemTime};
+use std::time::SystemTime;
 
 #[derive(PartialEq, Eq, Debug)]
 pub enum Event {
-    Create(Arc<Instance>),
-    Delete(Arc<Instance>),
+    Create(Instance),
+    Delete(Instance),
 }
 
 pub trait Watcher: Stream {}

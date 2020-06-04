@@ -1,4 +1,3 @@
-use discover::codec;
 use discover::codec::DEFAULT_CODEC;
 use discover::zk::Zk;
 use discover::Instance;
@@ -29,8 +28,8 @@ impl ZkCluster {
         };
         let connect_string = Self::read_connect_string(&mut process);
         ZkCluster {
-            process: process,
-            connect_string: connect_string,
+            process,
+            connect_string,
             closed: false,
         }
     }
@@ -78,7 +77,7 @@ async fn test_register_deregister() {
     let ins = Instance {
         zone: "sh1".to_owned(),
         env: "test".to_owned(),
-        appid: "provider".to_owned(),
+        appid: "/dubbo-rs/provider".to_owned(),
         hostname: "myhostname".to_owned(),
         addrs: vec![
             "http://172.1.1.1:8000".to_owned(),
@@ -95,7 +94,7 @@ async fn test_register_deregister() {
 
     let zk_client =
         ZooKeeper::connect(&cluster.connect_string, Duration::from_millis(3000), |_| {}).unwrap();
-    let path = "/dubbo-rs/com.dubbo.Test/providers/dubbo%3A%2F%2F127%2E0%2E0%2E1%3A20881%2Fcom%2Edubbo%2ETest%3Fversion%3D1%2E0%2E1%26group%3Dlocal%26dynamic%3Dtrue%26register%3Dfalse%26interface%3Dcom%2Edubbo%2ETest%26methods%3D";
+    let path = "/dubbo-rs/provider/zone=sh1&env=test&appid=/dubbo-rs/provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D";
     assert!(zk_client.exists(path, false).unwrap().is_some());
 
     let _ = zk.deregister(&ins).await;
