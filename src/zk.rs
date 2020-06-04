@@ -108,11 +108,14 @@ fn create_path(
                     .write()
                     .unwrap()
                     .insert(path.to_owned());
+                return Ok(());
             }
         }
 
         if let Some(pos) = path.rfind('/') {
-            path 
+            path = &path[..pos];
+        }else{
+            break;
         }
     }
     
