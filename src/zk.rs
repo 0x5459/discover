@@ -1,12 +1,12 @@
 use crate::{
     codec::{Codec, DecodeErorr, Decoder, EncodeErorr, Encoder},
-    Instance, Registry,
+    HashSet, Instance, Registry,
 };
 use futures::{ready, Future, FutureExt};
 use pin_project::pin_project;
 use std::{
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, RwLock},
     task::{Context, Poll},
     time::Duration,
 };
@@ -25,6 +25,7 @@ where
 {
     client: Arc<ZooKeeper>,
     codec: &'static Codec<EC, DC>,
+    persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
 }
 
 impl<EC, DC> Zk<EC, DC>
@@ -42,6 +43,7 @@ where
         task::spawn_blocking(move || Zk {
             client: Arc::new(ZooKeeper::connect(zk_urls.as_str(), timeout, |_| {}).unwrap()),
             codec,
+            persistent_exist_node_path: Arc::new(RwLock::new(HashSet::default())),
         })
         .map(|zk| zk.unwrap())
     }
@@ -59,6 +61,7 @@ impl RegFut {
         ins: Instance,
         codec: &'static Codec<EC, DC>,
         dynamic: bool,
+        persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
     ) -> Self
     where
         EC: Encoder + Sync + 'static,
@@ -71,25 +74,76 @@ impl RegFut {
                 let data = encoder
                     .encode(&ins)
                     .map_err(|e| -> EncodeErorr { e.into() })?;
-                client
-                    .ensure_path(ins.appid.as_str())
-                    .map_err(|e| ZkRegError::CreatePath(e))?;
-                client
-                    .create(
-                        ins.appid.as_str(),
-                        data,
-                        Acl::open_unsafe().clone(),
-                        if dynamic {
-                            CreateMode::Ephemeral
-                        } else {
-                            CreateMode::Persistent
-                        },
-                    )
-                    .map_err(|e| ZkRegError::CreatePath(e))?;
-                Ok(())
+                create_path(
+                    client,
+                    ins.appid.as_str(),
+                    data,
+                    dynamic,
+                    persistent_exist_node_path,
+                )
             }),
         }
     }
+}
+
+#[inline]
+fn create_path(
+    client: Arc<ZooKeeper>,
+    mut path: &str,
+    data: Vec<u8>,
+    dynamic: bool,
+    persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
+) -> Result<(), ZkRegError> {
+    loop {
+        if !dynamic {
+            if persistent_exist_node_path.read().unwrap().contains(path) {
+                return Ok(());
+            }
+            if client
+                .exists(path, false)
+                .map_err(|e| ZkRegError::CreatePath(e))?
+                .is_some()
+            {
+                persistent_exist_node_path
+                    .write()
+                    .unwrap()
+                    .insert(path.to_owned());
+            }
+        }
+
+        if let Some(pos) = path.rfind('/') {
+            path 
+        }
+    }
+    
+
+    if let Some(pos) = path.rfind('/') {
+        create_path(
+            client.clone(),
+            &path[..pos],
+            data,
+            false,
+            persistent_exist_node_path.clone(),
+        )?;
+    }
+
+    client
+        .create(
+            path,
+            data,
+            Acl::open_unsafe().clone(),
+            if dynamic {
+                CreateMode::Ephemeral
+            } else {
+                CreateMode::Persistent
+            },
+        )
+        .map_err(|e| ZkRegError::CreatePath(e))?;
+    persistent_exist_node_path
+        .write()
+        .unwrap()
+        .insert(path.to_owned());
+    Ok(())
 }
 
 impl Future for RegFut {
@@ -103,6 +157,7 @@ impl Future for RegFut {
     }
 }
 
+#[derive(Debug)]
 pub enum ZkRegError {
     Encode,
     Decode,
@@ -168,7 +223,13 @@ where
             .get("dynamic")
             .map(|v| v == "true")
             .unwrap_or(true);
-        RegFut::new(self.client.clone(), ins, self.codec, dynamic)
+        RegFut::new(
+            self.client.clone(),
+            ins,
+            self.codec,
+            dynamic,
+            self.persistent_exist_node_path.clone(),
+        )
     }
 
     fn deregister(&self, ins: &Instance) -> Self::DeRegFuture {

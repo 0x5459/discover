@@ -30,16 +30,18 @@ impl ZkWatcher {
 
         task::spawn_blocking(move || {
             let raw_instances = Arc::new(Mutex::new(HashSet::default()));
-            *raw_instances.lock().unwrap() = client.get_children_w(
-                appid,
-                ZkAppWatchHandler {
-                    zk_client: client.clone(),
-                    raw_instances: raw_instances.clone(),
-                    watch_event_tx: watch_event_tx.clone(),
-                    decoder,
-                },
-            ).map(|children| HashSet::from_iter(children.into_iter()))
-            .unwrap_or(HashSet::default()); // todo error;
+            *raw_instances.lock().unwrap() = client
+                .get_children_w(
+                    appid,
+                    ZkAppWatchHandler {
+                        zk_client: client.clone(),
+                        raw_instances: raw_instances.clone(),
+                        watch_event_tx: watch_event_tx.clone(),
+                        decoder,
+                    },
+                )
+                .map(|children| HashSet::from_iter(children.into_iter()))
+                .unwrap_or(HashSet::default()); // todo error;
         });
         Self {
             zk_client,
@@ -59,7 +61,9 @@ impl Stream for ZkWatcher {
     }
 }
 
-struct ZkAppWatchHandler<D> where D:'static
+struct ZkAppWatchHandler<D>
+where
+    D: 'static,
 {
     zk_client: Arc<ZooKeeper>,
     raw_instances: Arc<Mutex<HashSet<String>>>,
@@ -67,7 +71,7 @@ struct ZkAppWatchHandler<D> where D:'static
     decoder: &'static D,
 }
 
-impl< D> ZkAppWatchHandler< D>
+impl<D> ZkAppWatchHandler<D>
 where
     D: Decoder,
 {
@@ -75,8 +79,14 @@ where
         let (created_diff, deleted_diff) = {
             let mut old_instance = self.raw_instances.lock().unwrap();
             let diff = (
-                new_instances.difference(&old_instance).cloned().collect::<Vec<String>>(),
-                old_instance.difference(&new_instances).cloned().collect::<Vec<String>>(),
+                new_instances
+                    .difference(&old_instance)
+                    .cloned()
+                    .collect::<Vec<String>>(),
+                old_instance
+                    .difference(&new_instances)
+                    .cloned()
+                    .collect::<Vec<String>>(),
             );
             *old_instance = new_instances;
             diff
@@ -93,7 +103,7 @@ where
     }
 }
 
-impl< D> Watcher for ZkAppWatchHandler< D>
+impl<D> Watcher for ZkAppWatchHandler<D>
 where
     D: Decoder + Sync,
 {
