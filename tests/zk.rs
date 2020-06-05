@@ -1,14 +1,12 @@
-use discover::watcher::Event;
 use discover::codec::DEFAULT_CODEC;
 use discover::zk::Zk;
-use discover::Instance;
-use discover::Registry;
+use discover::{watcher::Event, Instance, Registry};
+use futures::stream::{self, StreamExt};
 use std::io::{BufRead, BufReader, Write};
+use std::pin::Pin;
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use zookeeper::ZooKeeper;
-use futures::future;
-use futures::stream::StreamExt;
 
 pub struct ZkCluster {
     process: Child,
@@ -114,7 +112,7 @@ async fn test_watch() {
         &DEFAULT_CODEC,
     )
     .await;
-    
+
     let app_id = "/dubbo-rs/provider";
     let ins1 = Instance {
         zone: "sh1".to_owned(),
@@ -150,7 +148,7 @@ async fn test_watch() {
 
     let _ = zk.register(ins1.clone()).await;
 
-    let watcher = zk.watch(app_id);
+    let mut watcher = zk.watch(app_id);
 
     let _ = zk.register(ins2.clone()).await;
 
@@ -158,17 +156,27 @@ async fn test_watch() {
 
     let _ = zk.deregister(&ins2).await;
 
-    watcher
-        .for_each(|e| {
-            match &e.event {
-                Event::Create(endpoint) => {
-                    println!("创建 {:?}", endpoint);
-                }
-                Event::Delete(endpoint) => {
-                    println!("删除 {:?}", endpoint);
-                }
-            }
-            future::ready(())
-        })
-        .await;
+    let first_event = watcher.next().await;
+    assert!(first_event.is_some());
+    let first_event = first_event.unwrap();
+    assert!(matches!(first_event.event, Event::Create(..)));
+    if let Event::Create(ins) = first_event.event {
+        assert_eq!(ins, ins2);
+    }
+
+    let second_event = watcher.next().await;
+    assert!(second_event.is_some());
+    let second_event = second_event.unwrap();
+    assert!(matches!(second_event.event, Event::Delete(..)));
+    if let Event::Delete(ins) = second_event.event {
+        assert_eq!(ins, ins1);
+    }
+
+    let third_event = watcher.next().await;
+    assert!(third_event.is_some());
+    let third_event = third_event.unwrap();
+    assert!(matches!(third_event.event, Event::Delete(..)));
+    if let Event::Delete(e) = third_event.event {
+        assert_eq!(e, ins2);
+    }
 }

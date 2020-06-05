@@ -159,7 +159,7 @@ impl Decoder for DefaultDecoder {
                 "zone" => ins.zone = v.into_owned(),
                 "env" => ins.env = v.into_owned(),
                 "appid" => ins.appid = v.into_owned(),
-                "hostname" => ins.env = v.into_owned(),
+                "hostname" => ins.hostname = v.into_owned(),
                 "addrs" => ins.addrs.push(v.into_owned()),
                 "version" => ins.version = v.into_owned(),
                 "metadata" => {
