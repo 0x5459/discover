@@ -184,8 +184,7 @@ lazy_static! {
 #[cfg(test)]
 mod tests {
 
-    use super::Encoder;
-    use super::DEFAULT_CODEC;
+    use super::{Decoder, Encoder, DEFAULT_CODEC};
     use crate::Instance;
 
     #[test]
@@ -205,7 +204,30 @@ mod tests {
         for case in cases.iter() {
             let res = encoder.encode(&case.0);
             assert!(res.is_ok());
-            assert_eq!(case.1, String::from_utf8(res.unwrap()).unwrap());
+            assert_eq!(String::from_utf8(res.unwrap()).unwrap(), case.1);
+        }
+    }
+
+    #[test]
+    fn test_default_decoder_decode() {
+        let cases = [
+            (
+                "zone=sh1&env=test&appid=provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D",
+                Instance {
+                zone: "sh1".to_owned(),
+                env: "test".to_owned(),
+                appid: "provider".to_owned(),
+                hostname: "myhostname".to_owned(),
+                addrs: vec!["http://172.1.1.1:8000".to_owned(), "grpc://172.1.1.1:9999".to_owned()],
+                version: "111".to_owned(),
+                metadata: [("weight".to_owned(), "10".to_owned())].iter().cloned().collect()
+            })
+        ];
+        let decoder = DEFAULT_CODEC.get_decoder_ref();
+        for case in cases.iter() {
+            let res = decoder.decode(case.0.as_bytes());
+            assert!(res.is_ok());
+            assert_eq!(res.unwrap(), case.1);
         }
     }
 }

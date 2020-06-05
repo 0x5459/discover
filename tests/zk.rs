@@ -176,7 +176,7 @@ async fn test_watch() {
     assert!(third_event.is_some());
     let third_event = third_event.unwrap();
     assert!(matches!(third_event.event, Event::Delete(..)));
-    if let Event::Delete(e) = third_event.event {
-        assert_eq!(e, ins2);
+    if let Event::Delete(ins) = third_event.event {
+        assert_eq!(ins, ins2);
     }
 }
