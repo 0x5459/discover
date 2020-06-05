@@ -6,7 +6,7 @@ use tower::discover::{Change, Discover};
 use watcher::{Event, WatchEvent};
 
 pub mod codec;
-mod watcher;
+pub mod watcher;
 pub mod zk;
 
 pub type HashSet<T> = std::collections::HashSet<T, std::hash::BuildHasherDefault<fxhash::FxHasher>>;

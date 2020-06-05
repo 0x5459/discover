@@ -1,3 +1,4 @@
+use discover::watcher::Event;
 use discover::codec::DEFAULT_CODEC;
 use discover::zk::Zk;
 use discover::Instance;
@@ -6,6 +7,8 @@ use std::io::{BufRead, BufReader, Write};
 use std::process::{Child, Command, Stdio};
 use std::time::Duration;
 use zookeeper::ZooKeeper;
+use futures::future;
+use futures::stream::StreamExt;
 
 pub struct ZkCluster {
     process: Child,
@@ -101,61 +104,71 @@ async fn test_register_deregister() {
     assert!(zk_client.exists(path, false).unwrap().is_none());
 }
 
-// #[tokio::test(threaded_scheduler)]
-// async fn test_watch() {
-//     let cluster = ZkCluster::start(3);
+#[tokio::test(threaded_scheduler)]
+async fn test_watch() {
+    let cluster = ZkCluster::start(3);
 
-//     let zk = Zk::new(&cluster.connect_string).await;
+    let zk = Zk::new(
+        &cluster.connect_string,
+        Duration::from_millis(3000),
+        &DEFAULT_CODEC,
+    )
+    .await;
+    
+    let app_id = "/dubbo-rs/provider";
+    let ins1 = Instance {
+        zone: "sh1".to_owned(),
+        env: "test".to_owned(),
+        appid: app_id.to_owned(),
+        hostname: "myhostname".to_owned(),
+        addrs: vec![
+            "http://172.1.1.1:8000".to_owned(),
+            "grpc://172.1.1.1:9999".to_owned(),
+        ],
+        version: "111".to_owned(),
+        metadata: [("weight".to_owned(), "10".to_owned())]
+            .iter()
+            .cloned()
+            .collect(),
+    };
 
-//     let s1 = endpoint::Endpoint {
-//         name: "com.dubbo.Test".into(),
-//         version: "1.0.1".to_string(),
-//         group: "local".to_string(),
-//         protocol: "dubbo".to_string(),
-//         address: "127.0.0.1".parse().unwrap(),
-//         port: 20881,
-//         java_interface: "com.dubbo.Test".to_string(),
-//         dynamic: true,
-//         register: false,
-//         methods: vec![],
-//         metadata: Default::default(),
-//     };
+    let ins2 = Instance {
+        zone: "sh1".to_owned(),
+        env: "test".to_owned(),
+        appid: app_id.to_owned(),
+        hostname: "myhostname".to_owned(),
+        addrs: vec![
+            "http://172.1.1.2:8000".to_owned(),
+            "grpc://172.1.1.2:9999".to_owned(),
+        ],
+        version: "111".to_owned(),
+        metadata: [("weight".to_owned(), "10".to_owned())]
+            .iter()
+            .cloned()
+            .collect(),
+    };
 
-//     let s2 = endpoint::Endpoint {
-//         name: "com.dubbo.Test".into(),
-//         version: "1.0.1".to_string(),
-//         group: "local".to_string(),
-//         protocol: "dubbo".to_string(),
-//         address: "127.0.0.2".parse().unwrap(),
-//         port: 20881,
-//         java_interface: "com.dubbo.Test".to_string(),
-//         dynamic: true,
-//         register: false,
-//         methods: vec![],
-//         metadata: Default::default(),
-//     };
+    let _ = zk.register(ins1.clone()).await;
 
-//     let _ = zk.register(&s1).await;
+    let watcher = zk.watch(app_id);
 
-//     let watcher = zk.watch(&("com.dubbo.Test".into()));
+    let _ = zk.register(ins2.clone()).await;
 
-//     let _ = zk.register(&s2).await;
+    let _ = zk.deregister(&ins1).await;
 
-//     let _ = zk.deregister(&s1).await;
+    let _ = zk.deregister(&ins2).await;
 
-//     let _ = zk.deregister(&s2).await;
-
-//     watcher
-//         .for_each(|e| {
-//             match &e.event {
-//                 crate::registry::watcher::Event::Create(endpoint) => {
-//                     println!("创建 {:?}", endpoint);
-//                 }
-//                 crate::registry::watcher::Event::Delete(endpoint) => {
-//                     println!("删除 {:?}", endpoint);
-//                 }
-//             }
-//             future::ready(())
-//         })
-//         .await;
-// }
+    watcher
+        .for_each(|e| {
+            match &e.event {
+                Event::Create(endpoint) => {
+                    println!("创建 {:?}", endpoint);
+                }
+                Event::Delete(endpoint) => {
+                    println!("删除 {:?}", endpoint);
+                }
+            }
+            future::ready(())
+        })
+        .await;
+}
