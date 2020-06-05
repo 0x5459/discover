@@ -94,8 +94,7 @@ async fn test_register_deregister() {
 
     let zk_client =
         ZooKeeper::connect(&cluster.connect_string, Duration::from_millis(3000), |_| {}).unwrap();
-    let path = "/dubbo-rs/provider/zone=sh1&env=test&appid=/dubbo-rs/provider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D";
-    println!("{:?}", zk_client.get_children("/dubbo-rs/provider", false));
+    let path = "/dubbo-rs/provider/zone=sh1&env=test&appid=%2Fdubbo-rs%2Fprovider&hostname=myhostname&addrs=http%3A%2F%2F172.1.1.1%3A8000&addrs=grpc%3A%2F%2F172.1.1.1%3A9999&version=111&metadata=%7B%22weight%22%3A%2210%22%7D";
     assert!(zk_client.exists(path, false).unwrap().is_some());
 
     let _ = zk.deregister(&ins).await;

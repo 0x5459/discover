@@ -1,5 +1,5 @@
 use crate::{
-    codec::{Codec, DecodeErorr, Decoder, EncodeErorr, Encoder},
+    codec::{Codec, DecodeErorr, Decoder, EncodeError, Encoder},
     HashSet, Instance, Registry,
 };
 use futures::{ready, Future, FutureExt};
@@ -14,7 +14,7 @@ use tokio::task;
 use tokio::task::JoinError;
 use tokio::task::JoinHandle;
 use zk_watcher::ZkWatcher;
-use zookeeper::{Acl, CreateMode, ZkError, ZooKeeper, ZooKeeperExt};
+use zookeeper::{Acl, CreateMode, ZkError, ZooKeeper};
 
 mod zk_watcher;
 
@@ -56,28 +56,27 @@ pub struct RegFut {
 }
 
 impl RegFut {
-    pub fn new<EC, DC>(
+    pub fn new<EC>(
         client: Arc<ZooKeeper>,
         ins: Instance,
-        codec: &'static Codec<EC, DC>,
+        encoder: &'static EC,
         dynamic: bool,
         persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
     ) -> Self
     where
         EC: Encoder + Sync + 'static,
-        DC: Decoder + Sync + 'static,
     {
-        let encoder = codec.get_encoder_ref();
-
         RegFut {
             join_handle: task::spawn_blocking(move || {
-                let data = encoder
-                    .encode(&ins)
-                    .map_err(|e| -> EncodeErorr { e.into() })?;
+                let last_path = String::from_utf8(
+                    encoder
+                        .encode(&ins)
+                        .map_err(|e| -> EncodeError { e.into() })?,
+                )
+                .map_err(|e| EncodeError {})?;
                 create_path(
                     client,
-                    ins.appid.as_str(),
-                    data,
+                    &(ins.appid + "/" + last_path.as_str()),
                     dynamic,
                     persistent_exist_node_path,
                 )
@@ -86,54 +85,43 @@ impl RegFut {
     }
 }
 
-#[inline]
 fn create_path(
     client: Arc<ZooKeeper>,
-    mut path: &str,
-    data: Vec<u8>,
+    path: &str,
     dynamic: bool,
     persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
 ) -> Result<(), ZkRegError> {
-    loop {
-        if !dynamic {
-            if persistent_exist_node_path.read().unwrap().contains(path) {
-                return Ok(());
-            }
-            if client
-                .exists(path, false)
-                .map_err(|e| ZkRegError::CreatePath(e))?
-                .is_some()
-            {
-                persistent_exist_node_path
-                    .write()
-                    .unwrap()
-                    .insert(path.to_owned());
-                return Ok(());
-            }
+    if !dynamic {
+        if persistent_exist_node_path.read().unwrap().contains(path) {
+            return Ok(());
         }
-
-        if let Some(pos) = path.rfind('/') {
-            path = &path[..pos];
-        }else{
-            break;
+        if client
+            .exists(path, false)
+            .map_err(|e| ZkRegError::CreatePath(e))?
+            .is_some()
+        {
+            persistent_exist_node_path
+                .write()
+                .unwrap()
+                .insert(path.to_owned());
         }
     }
-    
 
     if let Some(pos) = path.rfind('/') {
-        create_path(
-            client.clone(),
-            &path[..pos],
-            data,
-            false,
-            persistent_exist_node_path.clone(),
-        )?;
+        if pos > 0 {
+            create_path(
+                client.clone(),
+                &path[..pos],
+                false,
+                persistent_exist_node_path.clone(),
+            )?;
+        }
     }
 
     client
         .create(
             path,
-            data,
+            Vec::new(),
             Acl::open_unsafe().clone(),
             if dynamic {
                 CreateMode::Ephemeral
@@ -169,8 +157,8 @@ pub enum ZkRegError {
     Join(JoinError),
 }
 
-impl From<EncodeErorr> for ZkRegError {
-    fn from(e: EncodeErorr) -> Self {
+impl From<EncodeError> for ZkRegError {
+    fn from(e: EncodeError) -> Self {
         todo!()
     }
 }
@@ -188,9 +176,29 @@ pub struct DeRegFut {
 }
 
 impl DeRegFut {
-    pub fn new(client: Arc<ZooKeeper>, path: String) -> Self {
+    pub fn new<EC>(
+        client: Arc<ZooKeeper>,
+        ins: &Instance,
+        encoder: &'static EC,
+        persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
+    ) -> Self
+    where
+        EC: Encoder + Sync + 'static,
+    {
+        let ins = ins.clone();
         DeRegFut {
             join_handle: task::spawn_blocking(move || {
+                let last_path = String::from_utf8(
+                    encoder
+                        .encode(&ins)
+                        .map_err(|e| -> EncodeError { e.into() })?,
+                )
+                .map_err(|e| EncodeError {})?;
+                let path = ins.appid + "/" + last_path.as_str();
+                persistent_exist_node_path
+                    .write()
+                    .unwrap()
+                    .insert(path.clone());
                 client
                     .delete(path.as_str(), None)
                     .map_err(|e| ZkRegError::DeletePath(e))
@@ -229,14 +237,19 @@ where
         RegFut::new(
             self.client.clone(),
             ins,
-            self.codec,
+            self.codec.get_encoder_ref(),
             dynamic,
             self.persistent_exist_node_path.clone(),
         )
     }
 
     fn deregister(&self, ins: &Instance) -> Self::DeRegFuture {
-        DeRegFut::new(self.client.clone(), ins.appid.to_owned())
+        DeRegFut::new(
+            self.client.clone(),
+            ins,
+            self.codec.get_encoder_ref(),
+            self.persistent_exist_node_path.clone(),
+        )
     }
 
     fn watch(&self, appid: &'static str) -> Self::Watcher {

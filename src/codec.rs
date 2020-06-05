@@ -4,10 +4,10 @@ use lazy_static::lazy_static;
 use percent_encoding::{percent_decode_str, utf8_percent_encode, AsciiSet};
 use std::{fmt, str::Utf8Error};
 
-pub struct EncodeErorr {}
+pub struct EncodeError {}
 
 pub trait Encoder {
-    type Error: Into<EncodeErorr> + Display + Debug;
+    type Error: Into<EncodeError> + Display + Debug;
 
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error>;
 }
@@ -15,7 +15,7 @@ pub trait Encoder {
 impl<F, E> Encoder for F
 where
     F: Fn(&Instance) -> Result<Vec<u8>, E>,
-    E: Into<EncodeErorr> + Display + Debug,
+    E: Into<EncodeError> + Display + Debug,
 {
     type Error = E;
     fn encode(&self, ins: &Instance) -> Result<Vec<u8>, Self::Error> {
@@ -89,7 +89,7 @@ impl From<Utf8Error> for DefaultCodecError {
     }
 }
 
-impl From<DefaultCodecError> for EncodeErorr {
+impl From<DefaultCodecError> for EncodeError {
     fn from(_: DefaultCodecError) -> Self {
         todo!()
     }
