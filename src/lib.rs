@@ -40,9 +40,9 @@ pub trait Registry {
 
     type Watcher: Stream<Item = WatchEvent>;
 
-    fn register(&self, e: Instance) -> Self::RegFuture;
+    fn register(&self, ins: Instance) -> Self::RegFuture;
 
-    fn deregister(&self, e: &Instance) -> Self::DeRegFuture;
+    fn deregister(&self, ins: &Instance) -> Self::DeRegFuture;
 
     fn watch(&self, appid: &'static str) -> Self::Watcher;
 }
