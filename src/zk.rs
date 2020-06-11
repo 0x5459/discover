@@ -154,7 +154,7 @@ pub enum ZkRegError {
 
 impl std::error::Error for ZkRegError {}
 
-impl fmt::Display for Point {
+impl fmt::Display for ZkRegError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{:?}", self)
     }
