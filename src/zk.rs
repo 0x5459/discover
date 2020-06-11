@@ -157,6 +157,8 @@ pub enum ZkRegError {
     Join(JoinError),
 }
 
+impl std::error::Error for ZkRegError {}
+
 impl From<EncodeError> for ZkRegError {
     fn from(e: EncodeError) -> Self {
         todo!()
