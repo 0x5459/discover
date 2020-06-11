@@ -4,12 +4,7 @@ use crate::{
 };
 use futures::{ready, Future, FutureExt};
 use pin_project::pin_project;
-use std::{
-    pin::Pin,
-    sync::{Arc, RwLock},
-    task::{Context, Poll},
-    time::Duration,
-};
+use std::{pin::Pin, sync::{Arc, RwLock}, task::{Context, Poll}, time::Duration, fmt};
 use tokio::task;
 use tokio::task::JoinError;
 use tokio::task::JoinHandle;
@@ -19,9 +14,9 @@ use zookeeper::{Acl, CreateMode, ZkError, ZooKeeper};
 mod zk_watcher;
 
 pub struct Zk<EC, DC>
-where
-    EC: 'static,
-    DC: 'static,
+    where
+        EC: 'static,
+        DC: 'static,
 {
     client: Arc<ZooKeeper>,
     codec: &'static Codec<EC, DC>,
@@ -29,15 +24,15 @@ where
 }
 
 impl<EC, DC> Zk<EC, DC>
-where
-    EC: Sync,
-    DC: Sync,
+    where
+        EC: Sync,
+        DC: Sync,
 {
     pub fn new(
         zk_urls: &str,
         timeout: Duration,
         codec: &'static Codec<EC, DC>,
-    ) -> impl Future<Output = Zk<EC, DC>> {
+    ) -> impl Future<Output=Zk<EC, DC>> {
         let zk_urls = zk_urls.to_string();
 
         task::spawn_blocking(move || Zk {
@@ -45,7 +40,7 @@ where
             codec,
             persistent_exist_node_path: Arc::new(RwLock::new(HashSet::default())),
         })
-        .map(|zk| zk.unwrap())
+            .map(|zk| zk.unwrap())
     }
 }
 
@@ -63,8 +58,8 @@ impl RegFut {
         dynamic: bool,
         persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
     ) -> Self
-    where
-        EC: Encoder + Sync + 'static,
+        where
+            EC: Encoder + Sync + 'static,
     {
         RegFut {
             join_handle: task::spawn_blocking(move || {
@@ -73,7 +68,7 @@ impl RegFut {
                         .encode(&ins)
                         .map_err(|e| -> EncodeError { e.into() })?,
                 )
-                .map_err(|e| EncodeError {})?;
+                    .map_err(|e| EncodeError {})?;
                 create_path(
                     client,
                     &(ins.appid + "/" + last_path.as_str()),
@@ -159,6 +154,12 @@ pub enum ZkRegError {
 
 impl std::error::Error for ZkRegError {}
 
+impl fmt::Display for Point {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{:?}", self)
+    }
+}
+
 impl From<EncodeError> for ZkRegError {
     fn from(e: EncodeError) -> Self {
         todo!()
@@ -184,8 +185,8 @@ impl DeRegFut {
         encoder: &'static EC,
         persistent_exist_node_path: Arc<RwLock<HashSet<String>>>,
     ) -> Self
-    where
-        EC: Encoder + Sync + 'static,
+        where
+            EC: Encoder + Sync + 'static,
     {
         let ins = ins.clone();
         DeRegFut {
@@ -195,7 +196,7 @@ impl DeRegFut {
                         .encode(&ins)
                         .map_err(|e| -> EncodeError { e.into() })?,
                 )
-                .map_err(|e| EncodeError {})?;
+                    .map_err(|e| EncodeError {})?;
                 let path = ins.appid + "/" + last_path.as_str();
                 persistent_exist_node_path
                     .write()
@@ -218,9 +219,9 @@ impl Future for DeRegFut {
 }
 
 impl<EC, DC> Registry for Zk<EC, DC>
-where
-    EC: Encoder + Sync + 'static,
-    DC: Decoder + Sync + 'static,
+    where
+        EC: Encoder + Sync + 'static,
+        DC: Decoder + Sync + 'static,
 {
     type Error = ZkRegError;
 
